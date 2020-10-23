@@ -20,6 +20,6 @@ Next, we could deploy multiple machine learning algorithms regularized linear re
 We used regularized linear regression model using the package glmnet() and we throw in all interactions and second order. We applied grid search on alpha and nfolds to get the optimal parameters on 18 settings.
 
 <p align="middle">
-  <img src="https://github.com/Shuyi-bomi/machine-learning-predict-wine/blob/main/figure/glm.pdf" />
-  <img src="https://github.com/Shuyi-bomi/Neural-transfer/blob/main/result/1imgde2.png" width="200" /> 
+  <img src="https://github.com/Shuyi-bomi/machine-learning-predict-wine/blob/main/figure/glm.png" />
+  
 </p>
