@@ -47,6 +47,10 @@ library(mltools)
 #library(kableExtra)
 #library(MASS)
 set.seed(100) 
+
+
+##################     data preprocessing        ###########################################################
+#load data
 whitewine = read.csv('/Users/apple/Downloads/winequality-white.csv',sep=';', header=TRUE)
 #data cleaning
 whitewine <-  unique(whitewine)#delete repeat
@@ -72,14 +76,7 @@ ntrain = floor(nt*0.8)
 ii = sample(1:nrow(whitewine),ntrain)
 trainDf = whitewine[ii,-c(4,8)] #delete density&residual_sugar
 testDf = whitewine[-ii,-c(4,8)]
-#head(trainDf)
-# whitewinedis = whitewine[1:3,1:6]
-# whitewinedis1 = whitewine[1:3,7:12]
-# whitewinedisfi  = rbind(whitewinedis,whitewinedis1)
-#   kable(whitewine[1:3,]) %>%
-#   kable_styling("striped",full_width = F, position = "center")%>%
-#   column_spec(1:12, width = "3in")
-@
+
 
 <<echo=FALSE,message=FALSE>>=
 knitr::kable(whitewine[1:3,], col.names = c("fixed", "volatile", "citric", "sugar", "chlorides","free", "total", "density", "pH", "sulphates", "alcohol","quality"),caption = "Variables")
@@ -90,6 +87,8 @@ Since it obeys t distribution, we may consider the Bonferroni procedure and the 
 \[R_i = \lbrace |(t_i)| > t_{1- \frac{\alpha}{2n},n-p-1} \rbrace, i=1, \cdots,n\]
 We can easily get the value of it by using 'rstudent()'. From the result, we can see that observation 2782 in original dataset is an outlier. For multicollinearity problem, we use vif() and VIF=GVIF since there is no categorical variable. Predictor "density" and "sugar" has multicollinearity if we use standard rules of thumb 10 threshhold. Finally, we use table() to see distribution of quality. There is obvious unbalanced--almost 90\% 5,6,7 but less than 10\% 3,4,8 and 9. So we decide to combine quality catogery($3,4\rightarrow 0;~5\rightarrow 1;~6\rightarrow 2;~7\rightarrow 3;~8,9\rightarrow 4$). 
 
+##################     glm        ###########################################################
+
 \section{Regularized Linear Models}
 In this part, we use regularized linear regression model using the package glmnet() and we throw in all interactions and second order.
 
@@ -97,29 +96,7 @@ First, we will use cv.glmnet to pick the best lambda using cross-validation. In 
 {\bf alpha}($0,0.5,1$):The elasticnet mixing parameter, with $alpha = 0$ --ridge penalty, $alpha = 0.5$ --elastic net and $alpha = 1$ --lasso penalty .\\
 {\bf nfolds}($5-10$):The number of folds for cross validation. After initial search, we set nfolds in range.
 <<echo=FALSE,message=FALSE>>=
-##no y quality
-#require(methods)
-#linearinterract=model.matrix(quality ~(.)^2,data=trainDf)[,-1]
-#linearinterract1=model.matrix(quality ~(.)^2,data=testDf)[,-1]
-#grid search
-#hyper_gridglm = expand.grid(alpha = seq(0,1,by = 0.5),
-                         #nfolds = seq(5,10,by=1),
-                         #OOBerror = 0)
-# perform grid search
-#for(i in 1:nrow(hyper_gridglm)) {
-  
-  #fit.cv <- cv.glmnet(linearinterract, 
-                      #trainDf[,10], 
-                      #type.measure="deviance", 
-                      #alpha=hyper_gridglm$alpha[i],
-                      #nfolds=hyper_gridglm$nfolds[i],
-                      #standardize=TRUE,
-                      #family="multinomial")
-  # add OOB error to grid
-  #hyper_gridglm$OOBerror[i] <- sqrt(fit.cv$cvm)
-#}
-#cat("parameters of best model: " )
-#hyper_gridglm[which.min(hyper_gridglm$OOBerror),]
+
 hyper_gridglm = read.table("/Users/apple/Downloads/glmrmse.txt",header=TRUE,row.names=1)
 accglm = read.table("/Users/apple/Downloads/accglm.txt",header=TRUE,row.names=1)
 preglmmin = read.table("/Users/apple/Downloads/preglmmin.txt",header=TRUE,row.names=1)
@@ -128,19 +105,13 @@ lcnn = read.table("/Users/apple/Downloads/lcnn.txt",header=TRUE,row.names=1)
 @
 In order to choose the best lambda(lambda.min,lambda.1se) from the cross validation, we compare the accuracy and choose lambda.min. In addition to the grid search based on the smallest cross-validated error, Our best parameters for this model are given above:
 <<echo=FALSE,message=FALSE>>=
-#phatL = list() #store the test phat for the different methods here
-#phatL$glmmin = preglmmin$s0 #for lambda.min
+
 rownames(accglm)='accuracy'
 colnames(accglm)=c('lambda.min','lambda.1se')
-
-#knitr::kable(accglm,caption="Accuracy" )
-##so, choose lambda.min as best lambda
-#choose good one--lambda.min
-#cat("The confusion matrix is: " )
-#table(phatL$glmmin,testDf[,10]) # confusion matrix
 hyper_gridglm$lambda = 0.0005571729
 knitr::kable(hyper_gridglm[which.min(hyper_gridglm$OOBerror),],caption = "parameters of best regularized linear models")
 @
+
 \subsection{Error Plot, Roc curve and AUC}
 \begin{figure}[htb]
 \centering
@@ -163,9 +134,12 @@ From the plot, the five classes are all the positive rate, and the result of the
 
 {\bf AUC}: compute multi-class AUC as defined by Hand and Till. Higher the AUC, better the model. Multi-class area under the curve: 0.7352, Which is not bad.
 
+##################     Trees        ###########################################################
+
 \section{Trees}
 Let’s do multiple classification with the whitewine data. We read in train and test data sets.\\
 We use three tree methods here: single tree, Random Forest and boosting.
+
 \subsection{Single Tree}
 Firstly we apply single tree. We perform grid search on the following settings:\\
 {\bf minbucket}($2-5$):the minimum number of observations in any terminal <leaf> node.\\
@@ -192,36 +166,21 @@ for(i in 1:nrow(hyper_gridst)) {
 @
 
 <<echo=FALSE,message=FALSE>>=
-#knitr::kable(hyper_gridst[which.min(hyper_gridst$OOB_RMSE2sp),])
-#hyper_gridst[which.min(hyper_gridst$OOB_RMSE3sp),]
 
 cntrl = rpart.control(minbucket=hyper_gridst$minob[which.min(hyper_gridst$OOB_RMSE2sp)],minsplit=2*hyper_gridst$minob[which.min(hyper_gridst$OOB_RMSE2sp)],cp=0.00005)
 bigt = rpart(quality~., data=trainDf, control=cntrl, method="class") #use method="class" for classification
-
-
 iibest = which.min(bigt$cptable[,"xerror"]) #which has the lowest error 
 bestcp=bigt$cptable[iibest,"CP"]
 hyper_gridst$cp=bestcp
 hyper_gridst$minsplit =2*hyper_gridst$minob[which.min(hyper_gridst$OOB_RMSE2sp)]
-#plotcp(bigt)
-
-#bestsize = bigt$cptable[iibest,"nsplit"]+1
-#cat("bestsize: ",bestsize,"\n")
-
 #prune the big tree back using the best CP value
 best.tree = prune(bigt,cp=bestcp)
-#cat("size of best tree: ",length(unique(best.tree$where)))
-
 hyper_gridst$size = length(unique(best.tree$where))
-
 knitr::kable(hyper_gridst[which.min(hyper_gridst$OOB_RMSE2sp),!(colnames(hyper_gridst) %in% c("OOB_RMSE3sp"))],caption = "parameters of best single tree")
 
-#yhatpl = cbind(yhatpl,array(sapply(1:nrow(testDf),function(i) yhat[i,which.max(yhat[i,])] ))) #prob of choosing that class
-#yhatpl = cbind(yhatpl,array(sapply(1:nrow(testDf),function(i) yhat[i,trainDf$quality[i]-2] )))
-#colnames(yhatpl)[8:10]<- c("class","prob","prob(tclass)")
-#plot(trainDf$quality,yhatpl[,10]) 
-#abline(0,1/6,col="red")
 @
+##################     Tree ensemble methods        ###########################################################
+
 \subsection{Random Forest and Boosting}
 We compare two popular ensemble methods. There are more than 30 hyperparameter we could try, but we just choose three of them which influence greatly in this case. We will loop over a bunch of settings for them and store out of bag prediction error for each setting:
 
@@ -264,8 +223,6 @@ for(i in 1:nrow(hyper_gridrf)) {
   hyper_gridrf$OOB_RMSE[i] <- sqrt(model$prediction.error)
 }
 
-#hyper_grid = read.table("rmserf.txt",header=TRUE,row.names=1) # says first column are rownames
-
 optimal_RF <- ranger(
     formula         = quality ~ ., 
     data            = trainDf, 
@@ -276,6 +233,7 @@ optimal_RF <- ranger(
     importance      = 'impurity',
     classification = TRUE
   )
+#for predicted y valus as probabilities
 optimal_RFp <- ranger(
     formula         = quality ~ ., 
     data            = trainDf, 
@@ -287,6 +245,7 @@ optimal_RFp <- ranger(
     #classification = TRUE,
     probability = TRUE
   )
+  
 #boosting-----------------------------------
 xgb.data.train <- xgb.DMatrix(as.matrix(trainDf[, colnames(trainDf) != "quality"]), label = trainDf$quality)
 xgb.data.test <- xgb.DMatrix(as.matrix(testDf[, colnames(testDf) != "quality"]), label = testDf$quality)
@@ -294,16 +253,11 @@ xgb.data.test <- xgb.DMatrix(as.matrix(testDf[, colnames(testDf) != "quality"]),
 idv = c(2,3,4); ntv = 500; shv = c(.1,0.05,.01,0.005) 
 hyper_gridboost = expand.grid(idv,ntv,shv,  ooberror  = 0) 
 colnames(hyper_gridboost) = c("tdepth","ntree","shrink","ooberror") 
-#params <- list(booster = "gbtree", objective = "multi:softmax",num_class=7, eta=0.1, gamma=0.05, max_depth=3, min_child_weight=1, subsample=1, colsample_bytree=1)
 for (i in 1:nrow(hyper_gridboost)) {
   params <- list(booster = "gbtree", objective = "multi:softmax",num_class=5, eta=0.1, gamma=hyper_gridboost$shrink[i], max_depth=hyper_gridboost$tdepth[i], min_child_weight=1, subsample=1, colsample_bytree=1)
   xgbcv <- xgb.cv( params = params, data = xgb.data.train, nrounds = hyper_gridboost$ntree[i],  nfold = 10 ,print_every_n = 1000)
   hyper_gridboost$ooberror[i]=xgbcv$evaluation_log$test_merror_mean[which.min(xgbcv$evaluation_log$test_merror_mean)]
 }
-#write.table(hyper_gridboost,"boostrmse.txt")
-#hyper_gridboost = read.table("boostrmse.txt",header=TRUE,row.names=1) # says first column are rownames
-
-
 params <- list(booster = "gbtree", objective = "multi:softmax",num_class=5, eta=0.1, 
                gamma=hyper_gridboost$shrink[which.min(hyper_gridboost$ooberror)], 
                max_depth=hyper_gridboost$tdepth[which.min(hyper_gridboost$ooberror)], 
@@ -314,9 +268,8 @@ optimal_boost <- xgb.train (params = params, data = xgb.data.train, nrounds = be
 @
 
 <<echo=FALSE,message=FALSE>>=
-#cat("parameters of best random forest: " )
+#output results
 knitr::kable(hyper_gridrf[which.min(hyper_gridrf$OOB_RMSE),],caption="parameter of best random forest")
-#cat("parameters of best boosting: " )
 hyper_gridboost$ntree = bestn
 knitr::kable(hyper_gridboost[which.min(hyper_gridboost$ooberror),],caption="parameter of best boosting")
 
@@ -417,7 +370,6 @@ phatL = list() #store the test phat for the different methods here
 phatL$glmmin = preglmmin #lambda.min
 #predict single tree
 yhatst = predict(best.tree,newdata=testDf)
-#yhatpl = cbind(yhatst,array(sapply(1:nrow(testDf),function(i) which.max(yhatst[i,])))) #choose category
 phatL$singt = as.vector(sapply(1:nrow(testDf),function(i) which.max(yhatst[i,])-1))
 #random forest
 phatL$rf = predict(optimal_RF,data=testDf[,1:9])$predictions####gai####
@@ -450,12 +402,7 @@ for(i in 2:nfit) {
   lines(roc,col=i) 
 }
 legend(1, 1, c("0","1","2","3","4"), col = c(1, 2, 3, 4, 5),lwd=1, bg="transparent",cex=0.6)
-
 roc.multist = multiclass.roc(testDf$quality,phatL$singt, levels = c(0, 1,2,3,4) )
-# rs <- roc.multist[['rocs']]
-# plot.roc(rs[[1]],xlim=c(1,0),ylim=c(0,1), main="Single Tree",add=FALSE)
-# sapply(2:length(rs),function(i) lines.roc(rs[[i]],col=i))
-# legend(1, 1.8, c("class 1", "class 2", "class 3","class 4","class 5"), col = c(1, 2, 3,4,5), lwd = c(1,1,1,1,1),bg="transparent",cex=0.8)
 
 #RF
 qualityprerf=factor(phatL$rf,levels=0:4) # reset level in case some category doesn't show up in the prediction
@@ -468,10 +415,6 @@ for(i in 2:nfit) {
 }
 legend(1, 1, c("0","1", "2", "3","4"), col = c(1, 2, 3, 4, 5), lwd = c(1,1,1,1,1),bg="transparent",cex=0.6)
 roc.multirf = multiclass.roc(testDf$quality,phatL$rf)
-# rs <- roc.multirf[['rocs']]
-# plot.roc(rs[[1]],ylim=c(0.5,1),main="Random Forest")
-# sapply(2:length(rs),function(i) lines.roc(rs[[i]],col=i))
-# legend(1, 1.5, c("class 0", "class 1", "class 2"), col = c(1, 2, 3), lwd = c(1,1,1),bg="transparent",cex=0.9)
 
 #boosting
 qualitypreboost=factor(phatL$boosting,levels=0:4) # reset level in case some category doesn't show up in the prediction
@@ -484,10 +427,6 @@ for(i in 2:nfit) {
 }
 legend(1, 1, c("0","1", "2", "3","4"), col = c(1, 2, 3, 4, 5), lwd = c(1,1,1,1,1),bg="transparent",cex=0.6)
 roc.multiboost = multiclass.roc(testDf$quality,phatL$boosting)
-# rs <- roc.multiboost[['rocs']]
-# plot.roc(rs[[1]],ylim=c(0.5,1), main="boosting")
-# sapply(2:length(rs),function(i) lines.roc(rs[[i]],col=i))
-# legend(1, 1.5, c("class 0", "class 1", "class 2"), col = c(1, 2, 3), lwd = c(1,1,1),bg="transparent",cex=0.9)
 
 auc=cbind(auc(roc.multist),auc(roc.multirf),auc(roc.multiboost))
 rownames(auc)='auc'
@@ -497,6 +436,8 @@ knitr::kable(auc)
 Therefore,from the Roc curve we could see that both three models predicts bad at class 0 and 4 and RF$>$boosting$>$single tree. Also, AUC provides very similar results.\\
 Combined with accuracy above, we choose random forest as out best tree model.
 
+##################     NN        ###########################################################
+
 \section{Neural Network}
 \subsection{Single Layer Neural Network}
 
@@ -504,7 +445,6 @@ First, we apply Single Layer Neural Network to train the model. In order to get 
 
 <<echo=FALSE,message=FALSE>>=
 #single
-#single_params = read.table("/Users/apple/Downloads/mratednn_single_1.txt",header=TRUE,row.names=1)
 single_params=data.frame(hidden="10",l1=0.01,epochs=500,activation="TanhWithDropout",   rate=0.01)
 #knitr::kable(single_params, caption = "parameters of best single neural network")
 @
@@ -519,13 +459,11 @@ Each grid search above could take few hours to run. However, we found another se
 Then we could see their best parameters chosen by out of sample error.
 
 <<echo=FALSE,message=FALSE>>=
-#random
+#random search results
 #random_params = read.table("/Users/apple/Downloads/mratednn_random_1.txt",header=TRUE,row.names=1)
 single_params=data.frame(hidden="10",l1=0.01,epochs=500,activation="TanhWithDropout",   rate=0.01)
 deep_params=data.frame(hidden="10,15",l1=0.001,epochs=3000,activation="TanhWithDropout",   rate=0.01)
 random_params=data.frame(hidden="50",l1=0.0001,epochs=100,activation="Tanh",   rate=0.001)
-#kable(random_params) %>%
-  #kable_styling(bootstrap_options = c("striped", "hover", "condensed"))
 nnbpa = rbind(single_params,deep_params,random_params)
 rownames(nnbpa) = c("Single layer","Deep layer","Random search")
 knitr::kable(nnbpa, caption = "parameters of best model from different NN")
@@ -613,21 +551,7 @@ liftcurve = function(phat.list,y.list){
 }
 lcrf = as.data.frame(liftcurve(as.data.frame(probrf), qualityte))
 lcglm = as.data.frame(liftcurve(probglm, qualityte))
-#lcnn = as.data.frame(liftcurve(probnn, qualityte))
 
-# lift.many.plot = function(phat.list, y.list,...) {
-#   if(is.factor(y.list)) y.list = as.numeric(y.list)-1
-#   n = nrow(y.list)
-#   par(mai=c(.8, 1.2, .5, .5))
-#   plot(c(0,1), c(0,1), type="n", xlab='% tried', ylab='% of successes', ...)
-#   abline(0, 1, lty=2)
-#   ii = (1:n) / n
-#   for(i in 1:length(phat.list)) {
-#     oo = order(-phat.list[[i]])
-#     sy = cumsum(y.list[[i]][oo])/sum(y.list[[i]]==1)
-#     lines(ii,sy,type="l",lwd=2,col=i)
-#   }
-# }
 plotlcglm =ggplot(lcglm, aes(x=(1:nrow(lcglm))/nrow(lcglm))) +
   geom_line(aes(y = lcglm$V1, colour = "0")) +
   geom_line(aes(y = lcglm$V2, colour = "1"))+
@@ -674,13 +598,7 @@ plotlcnn =ggplot(lcnn, aes(x=(1:nrow(lcnn))/nrow(lcnn))) +
                       guide = "legend") 
 
 grid.arrange(plotlcglm, plotlcrf,plotlcnn, ncol=3, nrow = 1)
-# phatLLrf = vector("list",nfit)
-# for(i in 1:nfit) {
-# phatLLrf[[i]] = probrf[,i] }
-# lift.many.plot(phatLLrf, qualityte)
-# legend(0, 1, c("1", "2", "3","4","5"), col = c(1, 2, 3,4,5), lwd = c(1,1,1,1,1),bg="transparent",cex=0.7)
 accfi = data.frame(GLM=c(0.5442),RF=c(0.5657),NN=c(0.5676))
-#colnames(accfi) = c("GLM","RF","NN+NN")
 knitr::kable(accfi, caption = "Accuracy of best final models")
 @
 
