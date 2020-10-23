@@ -13,9 +13,9 @@ library(dplyr)
 library(gridExtra)
 library(glmnet)
 library(MASS)
-
-#library(MASS)
+#reproduce
 set.seed(100) 
+#load data
 white_url <- "https://archive.ics.uci.edu/ml/machine-learning-databases/wine-quality/winequality-white.csv"
 whitewine <- read.csv(white_url, header = TRUE, sep = ";")
 #data cleaning
@@ -25,10 +25,13 @@ which(is.na(whitewine))#missing data
 linear_0 <- lm(quality ~ . , whitewine) 
 nt=nrow(whitewine)
 p=11 
+#detect outlier 
 alpha=0.05
 stud.del.resids= rstudent(linear_0)
 whitewine = whitewine[-which(stud.del.resids[] > qt(1-alpha/(2*nt),nt-p-1)),]#outlier point Y-2295
+#detect multicollinearity
 vif(linear_0)
+#solve inbalanced issue(response)
 category=function(a){
   if(a<=4){return(0)}
   if(a==5){return(1)}
@@ -38,49 +41,26 @@ category=function(a){
 }
 quality2=sapply(1:nrow(whitewine),function(i) category(whitewine$quality[i]))
 whitewine$quality = quality2
+#split train,test dataset
 ntrain = floor(nt*0.8)
 ii = sample(1:nrow(whitewine),ntrain)
 trainDf = whitewine[ii,-c(4,8)] #delete density&residual_sugar
 testDf = whitewine[-ii,-c(4,8)]
 attach(whitewine)
+                
 #--------------------second chunk(just show result of data)-----------------
-knitr::kable(whitewine[1:3,],digits=2) ###too broad ,我改一下
+knitr::kable(whitewine[1:3,],digits=2) 
+                
 #--------------------third chunk(don't show message and code)-----------------
 
-# tr.lm=lm(quality~fixed.acidity + volatile.acidity + citric.acid + 
-#                     chlorides + free.sulfur.dioxide + total.sulfur.dioxide + 
-#                     pH + sulphates + alcohol,data=trainDf)
-#trainDf1 = as.data.frame(scale(trainDf[,1:9]))
-#trainDf1 = cbind(trainDf1,trainDf$quality)
-#colnames(trainDf1)[10]=c("quality")
-# tr.lm.interract <- lm(quality~(.)^2,data=trainDf1)
-# summary(tr.lm.interract)
-# tr.lm.interract.step = stepAIC(tr.lm.interract, 
-#                             direction = "both", trace = 0)
-# summary(tr.lm.interract.step)
 
-##no y quality
+# add all interactions abd second order
 linearinterract=model.matrix(quality ~(.)^2,data=trainDf)[,-1]
 linearinterract1=model.matrix(quality ~(.)^2,data=testDf)[,-1]
-
-# selectlinear1=model.matrix(quality ~ fixed.acidity + volatile.acidity + citric.acid + 
-#                             chlorides + free.sulfur.dioxide + total.sulfur.dioxide + 
-#                             pH + sulphates + alcohol + fixed.acidity:citric.acid + fixed.acidity:free.sulfur.dioxide + 
-#                             fixed.acidity:pH + volatile.acidity:free.sulfur.dioxide + 
-#                             volatile.acidity:total.sulfur.dioxide + volatile.acidity:alcohol + 
-#                             citric.acid:sulphates + chlorides:free.sulfur.dioxide + chlorides:total.sulfur.dioxide + 
-#                             chlorides:pH + chlorides:alcohol + free.sulfur.dioxide:total.sulfur.dioxide + 
-#                             free.sulfur.dioxide:pH + free.sulfur.dioxide:sulphates + 
-#                             free.sulfur.dioxide:alcohol + total.sulfur.dioxide:pH + total.sulfur.dioxide:sulphates + 
-#                             pH:alcohol + sulphates:alcohol,data=testDf)[,-1]
-
-
-#plot(fid1,xlab="obs number",ylab="fold id",cex.axis=1.5,cex.lab=1.5)
 
 #grid search
 hyper_gridglm = expand.grid(alpha = seq(0,1,by = 0.5),
                          nfolds = seq(5,10,by=1),
-                         #gamma = c(0, 0.25, 0.5, 0.75, 1),
                          OOBerror = 0)
 
 # perform grid search
@@ -99,8 +79,7 @@ for(i in 1:nrow(hyper_gridglm)) {
 cat("parameters of best model: " )
 hyper_gridglm[which.min(hyper_gridglm$OOBerror),]
 
-#nfold=5
-#fid1 =  getfolds(nfold,n)
+#use the best setting from grid search above, find best lambda for regularized lm
 optimal_RLM = cv.glmnet(linearinterract, 
                         trainDf[,10], 
                         type.measure="deviance", 
@@ -109,14 +88,7 @@ optimal_RLM = cv.glmnet(linearinterract,
                         standardize=TRUE,
                         family="multinomial")
 
-###alpha=  is best model
-# wine.las = optimal_RLM$glmnet.fit
-# bhatLm = coef(wine.las ,s=optimal_RLM$lambda.min)[,1] #[,1] gets rid of sparse matrix format 
-# names(bhatLm[abs(bhatLm)==0]) #which one are 0??
-# bhatLmse = coef(wine.las ,s=optimal_RLM$lambda.1se)[,1] #[,1] gets rid of sparse matrix format 
-# names(bhatLm[abs(bhatLmse)==0]) #which one are 0??
-# plot(wine.las)
-
+#apply to ridge regularization and lambda from optimal_RLM
 fit.ridge.best <- glmnet(linearinterract, trainDf[,10], family = "multinomial", alpha = hyper_gridglm$alpha[which.min(hyper_gridglm$OOBerror)],
                          lambda = optimal_RLM$lambda.min)
 fit.ridge.bestse <- glmnet(linearinterract, trainDf[,10], family = "multinomial", alpha =  hyper_gridglm$alpha[which.min(hyper_gridglm$OOBerror)],
