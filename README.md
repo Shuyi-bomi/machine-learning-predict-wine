@@ -30,7 +30,31 @@ We compared single tree with two popular ensemble methods(random forest\&boostin
   <img src="https://github.com/Shuyi-bomi/machine-learning-predict-wine/blob/main/figure/treeooberror.png" width="600" />
   <img src="https://github.com/Shuyi-bomi/machine-learning-predict-wine/blob/main/figure/tree%20compare.png" width="600" />
 </p>
-The top plot demonstrated out of bag error while the bottom showed ROC curve(with AUC) with regard to the best setting for each model. The other advantage for tree models is that it could provide variable importance like the following:
+The top plot demonstrated out of bag error while the bottom showed ROC curve(with AUC) with regard to the best setting for each model. The other advantage for tree models is that it could provide variable importance like the figure below. From the plot we could see variable ’alcohol’ is the most important obviously, variable ’volatile.acidity’,’free.sulfur.dioxide’ and ’chlorides’ seem to be relatively important, ’fixed.acidity’ and ’sulphates’ turn out to be most negligible.
 <p align="middle">
   <img src="https://github.com/Shuyi-bomi/machine-learning-predict-wine/blob/main/figure/variable%20importance.png" width="600" />
 </p>
+
+## Neural Network
+
+We implemented Single Layer Neural Network and Deep Layer Neural Network to train. In this case grid search is not an ideal methods since it may take few hours to run, however, we found another search method called random search. Random search is a technique where random combinations of the hyperparameters are used to find best solution for the built model. It tries random combination of the values we set. In order to compare, we used both and see how our of sample error looked like:
+
+<p align="middle">
+  <img src="https://github.com/Shuyi-bomi/machine-learning-predict-wine/blob/main/figure/nnerror.png" width="600" />
+</p>
+
+We could see that random search for deep neural network obtained lowest error.
+
+**Stacking**
+From the lift curve below, it’s interesting that the category 0 and 4 looks good through lift curve however the accuracy rate is very low when predicting them. After examining the probability predicted, we think the main reason is the total number in those categories is too low. The probability predicted is too small to beat the most two populor category 2 and 3. If it is a binary case, it can be fixed by setting the threshold. But for five category, it’s hard to do that. Therefore, maybe it is possible to let the machine find the pattern behind the lift curve by stacking! Specifically, we could let the output from single neural network as the input of another neural network. And the right figure shows it really did improvement when predicting for the categories which had a good lift curve. 
+
+<p align="middle">
+  <img src="https://github.com/Shuyi-bomi/machine-learning-predict-wine/blob/main/figure/nn%20improvement.png" width="600" />
+</p>
+
+Finally, let’s compare all best models: GLMs, RF and NN+NN by putting them all on the same lift plot.
+
+<p align="middle">
+  <img src="https://github.com/Shuyi-bomi/machine-learning-predict-wine/blob/main/figure/final%20lift%20curve.png" width="600" />
+</p>
+From the lift curve, we could see that NN+NN shows a good performance for all categories especially 1, 2 and 3, a lot better compared to the other two methods.
