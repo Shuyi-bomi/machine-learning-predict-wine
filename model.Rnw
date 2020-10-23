@@ -1,0 +1,693 @@
+\documentclass[a4paper]{article}
+\usepackage{CJK}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{anysize}
+\usepackage{float}
+\usepackage{graphicx}
+\usepackage{subfigure}
+\marginsize{1.8cm}{1.8cm}{2cm}{2cm}
+\setlength{\parindent}{0pt}
+\begin{document}
+\title{\bf STP 598 Final Project}
+\author{Shuyi Li, Jin Lu, Qingqing Wu\\}
+\maketitle
+\setlength{\baselineskip}{13pt}
+\setlength{\parskip}{1em}
+\vspace{10pt}
+
+
+% =================================================================================
+%                                 Problem 1
+% =================================================================================
+
+%-------------------------------------------
+\section{Introduction}
+%--------------------------------------------
+Wine industry shows a recent growth spurt as social drinking is on the rise. For the wine market, it would be of interest if human quality of tasting can be related to the chemical properties of wine so that certification and quality assessment and assurance process is more controlled. The goal of this project is to test the effectiveness of different machine learning methods in its ability to accurately classify the quality given a set of variables describing the chemical composition of the wine. Here, we use five methods: regularized linear regression, single tree, boosting, random forest and neural nets. 
+%-------------------------------------------
+\section{Wine data}
+%--------------------------------------------
+Our Whitewine dataset is produced in a particular area of Portugal. Data are collected on 12 different properties of the wines of which response is Quality(discrete), and the rest are chemical properties(all are continuous). When running our models we split the data into two data sets: the training data vs testing $8:2$. Here, we show the first three rows of the 12 varaibles:
+\vspace{8pt}
+<<echo=FALSE, message=FALSE,include=FALSE>>=
+library(rpart)
+library(tree)
+library(randomForest)
+library(xgboost)
+library(ranger)
+library(broom)
+library(ggplot2)
+library(pROC)
+library(car)
+library(dplyr)
+library(gridExtra)
+library(data.table)
+library(mltools)
+#library(kableExtra)
+#library(MASS)
+set.seed(100) 
+whitewine = read.csv('/Users/apple/Downloads/winequality-white.csv',sep=';', header=TRUE)
+#data cleaning
+whitewine <-  unique(whitewine)#delete repeat
+which(is.na(whitewine))#missing data
+#remove outlier
+linear_0 <- lm(quality ~ . , whitewine) 
+nt=nrow(whitewine)
+p=11 
+alpha=0.05
+stud.del.resids= rstudent(linear_0)
+whitewine = whitewine[-which(stud.del.resids[] > qt(1-alpha/(2*nt),nt-p-1)),]#outlier point Y-2295
+vif(linear_0)
+category=function(a){
+  if(a<=4){return(0)}
+  if(a==5){return(1)}
+  if(a==6){return(2)}
+  if(a==7){return(3)}
+  if(a>7){return(4)}
+}
+quality2=sapply(1:nrow(whitewine),function(i) category(whitewine$quality[i]))
+whitewine$quality = quality2
+ntrain = floor(nt*0.8)
+ii = sample(1:nrow(whitewine),ntrain)
+trainDf = whitewine[ii,-c(4,8)] #delete density&residual_sugar
+testDf = whitewine[-ii,-c(4,8)]
+#head(trainDf)
+# whitewinedis = whitewine[1:3,1:6]
+# whitewinedis1 = whitewine[1:3,7:12]
+# whitewinedisfi  = rbind(whitewinedis,whitewinedis1)
+#   kable(whitewine[1:3,]) %>%
+#   kable_styling("striped",full_width = F, position = "center")%>%
+#   column_spec(1:12, width = "3in")
+@
+
+<<echo=FALSE,message=FALSE>>=
+knitr::kable(whitewine[1:3,], col.names = c("fixed", "volatile", "citric", "sugar", "chlorides","free", "total", "density", "pH", "sulphates", "alcohol","quality"),caption = "Variables")
+@
+{\bf Data Preprocessing}:After reading dataset, we need to perform necessary diagnostic (repeated data, missing data, outlier, multicollinearity issue and distribution of response). It's easy to check first 2(repeated and missing data). For outliers, we start from calculating 'semi\_studentized deleted residuals':
+\[t_i=\frac{d_i}{SE(d_i)}=\frac{e_i}{\sqrt{MSE_{(i)}}(1-h_{ii})} \sim t_{n-p-1}\]
+Since it obeys t distribution, we may consider the Bonferroni procedure and the rejection region for the ith data point is:
+\[R_i = \lbrace |(t_i)| > t_{1- \frac{\alpha}{2n},n-p-1} \rbrace, i=1, \cdots,n\]
+We can easily get the value of it by using 'rstudent()'. From the result, we can see that observation 2782 in original dataset is an outlier. For multicollinearity problem, we use vif() and VIF=GVIF since there is no categorical variable. Predictor "density" and "sugar" has multicollinearity if we use standard rules of thumb 10 threshhold. Finally, we use table() to see distribution of quality. There is obvious unbalanced--almost 90\% 5,6,7 but less than 10\% 3,4,8 and 9. So we decide to combine quality catogery($3,4\rightarrow 0;~5\rightarrow 1;~6\rightarrow 2;~7\rightarrow 3;~8,9\rightarrow 4$). 
+
+\section{Regularized Linear Models}
+In this part, we use regularized linear regression model using the package glmnet() and we throw in all interactions and second order.
+
+First, we will use cv.glmnet to pick the best lambda using cross-validation. In this way, we will perform grid search on $alpha$ and $nfolds$ to get the optimal parameters.
+{\bf alpha}($0,0.5,1$):The elasticnet mixing parameter, with $alpha = 0$ --ridge penalty, $alpha = 0.5$ --elastic net and $alpha = 1$ --lasso penalty .\\
+{\bf nfolds}($5-10$):The number of folds for cross validation. After initial search, we set nfolds in range.
+<<echo=FALSE,message=FALSE>>=
+##no y quality
+#require(methods)
+#linearinterract=model.matrix(quality ~(.)^2,data=trainDf)[,-1]
+#linearinterract1=model.matrix(quality ~(.)^2,data=testDf)[,-1]
+#grid search
+#hyper_gridglm = expand.grid(alpha = seq(0,1,by = 0.5),
+                         #nfolds = seq(5,10,by=1),
+                         #OOBerror = 0)
+# perform grid search
+#for(i in 1:nrow(hyper_gridglm)) {
+  
+  #fit.cv <- cv.glmnet(linearinterract, 
+                      #trainDf[,10], 
+                      #type.measure="deviance", 
+                      #alpha=hyper_gridglm$alpha[i],
+                      #nfolds=hyper_gridglm$nfolds[i],
+                      #standardize=TRUE,
+                      #family="multinomial")
+  # add OOB error to grid
+  #hyper_gridglm$OOBerror[i] <- sqrt(fit.cv$cvm)
+#}
+#cat("parameters of best model: " )
+#hyper_gridglm[which.min(hyper_gridglm$OOBerror),]
+hyper_gridglm = read.table("/Users/apple/Downloads/glmrmse.txt",header=TRUE,row.names=1)
+accglm = read.table("/Users/apple/Downloads/accglm.txt",header=TRUE,row.names=1)
+preglmmin = read.table("/Users/apple/Downloads/preglmmin.txt",header=TRUE,row.names=1)
+probglm = read.table("/Users/apple/Downloads/probglm.txt",header=TRUE,row.names=1)
+lcnn = read.table("/Users/apple/Downloads/lcnn.txt",header=TRUE,row.names=1)
+@
+In order to choose the best lambda(lambda.min,lambda.1se) from the cross validation, we compare the accuracy and choose lambda.min. In addition to the grid search based on the smallest cross-validated error, Our best parameters for this model are given above:
+<<echo=FALSE,message=FALSE>>=
+#phatL = list() #store the test phat for the different methods here
+#phatL$glmmin = preglmmin$s0 #for lambda.min
+rownames(accglm)='accuracy'
+colnames(accglm)=c('lambda.min','lambda.1se')
+
+#knitr::kable(accglm,caption="Accuracy" )
+##so, choose lambda.min as best lambda
+#choose good one--lambda.min
+#cat("The confusion matrix is: " )
+#table(phatL$glmmin,testDf[,10]) # confusion matrix
+hyper_gridglm$lambda = 0.0005571729
+knitr::kable(hyper_gridglm[which.min(hyper_gridglm$OOBerror),],caption = "parameters of best regularized linear models")
+@
+\subsection{Error Plot, Roc curve and AUC}
+\begin{figure}[htb]
+\centering
+\subfigure[Oob-error-plot.]{
+  \includegraphics[width=5.5cm]{/Users/apple/Downloads/Glmerror.png}
+}
+\quad
+\subfigure[Roc for glm.]{
+  \includegraphics[width=6cm]{/Users/apple/Downloads/Rocglm.png}
+}
+\quad
+%\caption{Roc for GLM}
+\end{figure}
+{\bf Error Plot}: Within different settings, the above plot shows the change of the out of sample error. It appears that parameters we choose have lowest out of sample error.
+
+{\bf Roc Curve}: Cause we need to draw Roc curve for multi-class, the approaches are:\\
+{\bf 1:'binarizing'}: Which means converting the problem to binary classification, using either macro-averaging or micro-averaging;\\
+{\bf 2:'One vs. All'}: Draw multiple ROC curves, one per class. This means we need to do one-hot encoding for response-quality in test dataset, and then do one-hot encoding regarding predicted class for each model and apply roc() function same as binary case.\\
+From the plot, the five classes are all the positive rate, and the result of the class 2,3,4 ($quality = 5$) are better. While the class 1,5 ($quality \leq  4$ or $quality \geq  8$ ) are worse.
+
+{\bf AUC}: compute multi-class AUC as defined by Hand and Till. Higher the AUC, better the model. Multi-class area under the curve: 0.7352, Which is not bad.
+
+\section{Trees}
+Let’s do multiple classification with the whitewine data. We read in train and test data sets.\\
+We use three tree methods here: single tree, Random Forest and boosting.
+\subsection{Single Tree}
+Firstly we apply single tree. We perform grid search on the following settings:\\
+{\bf minbucket}($2-5$):the minimum number of observations in any terminal <leaf> node.\\
+{\bf minsplit}($2/3*minbucket$):the minimum number of observations that must exist in a node in order for a split to be attempted.\\
+{\bf cp}(initial$=0.00005$):Any split that does not increase the overall lack of fit by a factor of cp is not attempted.\\
+We then find bestcp regarding cross validation error and prune big tree back through bestcp(define as best.tree). The best parameters and tree size are as follows.
+<<echo=FALSE,include=FALSE,message=FALSE>>=
+#single tree
+hyper_gridst <- expand.grid(
+  minob      = seq(2, 5, by = 1),
+  OOB_RMSE2sp  = 0,
+  OOB_RMSE3sp  = 0
+)
+for(i in 1:nrow(hyper_gridst)) {
+  cntrl = rpart.control(minbucket=hyper_gridst$minob[i],minsplit=2*hyper_gridst$minob[i],cp=0.00005)
+  bigt = rpart(quality~., data=trainDf, control=cntrl, method="class") #use method="class" for classification
+  hyper_gridst$OOB_RMSE2sp[i] <- bigt$cptable[which.min(bigt$cptable[,"xerror"]),"xerror"]
+}
+for(i in 1:nrow(hyper_gridst)) {
+  cntrl = rpart.control(minbucket=hyper_gridst$minob[i],minsplit=3*hyper_gridst$minob[i],cp=0.00005)
+  bigt = rpart(quality~., data=trainDf, control=cntrl, method="class") #use method="class" for classification
+  hyper_gridst$OOB_RMSE3sp[i] <- bigt$cptable[which.min(bigt$cptable[,"xerror"]),"xerror"]
+}
+@
+
+<<echo=FALSE,message=FALSE>>=
+#knitr::kable(hyper_gridst[which.min(hyper_gridst$OOB_RMSE2sp),])
+#hyper_gridst[which.min(hyper_gridst$OOB_RMSE3sp),]
+
+cntrl = rpart.control(minbucket=hyper_gridst$minob[which.min(hyper_gridst$OOB_RMSE2sp)],minsplit=2*hyper_gridst$minob[which.min(hyper_gridst$OOB_RMSE2sp)],cp=0.00005)
+bigt = rpart(quality~., data=trainDf, control=cntrl, method="class") #use method="class" for classification
+
+
+iibest = which.min(bigt$cptable[,"xerror"]) #which has the lowest error 
+bestcp=bigt$cptable[iibest,"CP"]
+hyper_gridst$cp=bestcp
+hyper_gridst$minsplit =2*hyper_gridst$minob[which.min(hyper_gridst$OOB_RMSE2sp)]
+#plotcp(bigt)
+
+#bestsize = bigt$cptable[iibest,"nsplit"]+1
+#cat("bestsize: ",bestsize,"\n")
+
+#prune the big tree back using the best CP value
+best.tree = prune(bigt,cp=bestcp)
+#cat("size of best tree: ",length(unique(best.tree$where)))
+
+hyper_gridst$size = length(unique(best.tree$where))
+
+knitr::kable(hyper_gridst[which.min(hyper_gridst$OOB_RMSE2sp),!(colnames(hyper_gridst) %in% c("OOB_RMSE3sp"))],caption = "parameters of best single tree")
+
+#yhatpl = cbind(yhatpl,array(sapply(1:nrow(testDf),function(i) yhat[i,which.max(yhat[i,])] ))) #prob of choosing that class
+#yhatpl = cbind(yhatpl,array(sapply(1:nrow(testDf),function(i) yhat[i,trainDf$quality[i]-2] )))
+#colnames(yhatpl)[8:10]<- c("class","prob","prob(tclass)")
+#plot(trainDf$quality,yhatpl[,10]) 
+#abline(0,1/6,col="red")
+@
+\subsection{Random Forest and Boosting}
+We compare two popular ensemble methods. There are more than 30 hyperparameter we could try, but we just choose three of them which influence greatly in this case. We will loop over a bunch of settings for them and store out of bag prediction error for each setting:
+
+{\bf Random Forests}: We use ranger() to perform and it will provide out-of-sample error from this model.\\
+{\bf mtry}:$~seq(2,9,by=1)$ (the number of variables sampled each time you want to pick a rule);\\
+{\bf sample.fraction}:$~c( .70, .80, 1)$ (Fraction of observations);\\
+{\bf num.tree}:$~seq(500,1000,by=100)$ (number of trees);\\
+We choose the one with lowest out of sample error and save model as $optimal_{RF}$. 
+
+{\bf Boosting}: Before we try various setting, we need to choose hyperparameter value for cross validation k since we use xgb.cv() and eta(learning rate), otherwise looping over all these settings would be too time-consuming. We set $k=10$ and $eta=0.1$ after initail gird search for these 2 parameter. Next, we will try various settings and store 10-fold cross validation error for each:\\
+{\bf maxdept}:$seq(2,9,by=1)$(the depth of the tree);\\
+{\bf gamma}:$c(.1,0.05,.01)$(shrinkage of regularization)\\
+{\bf nrounds}:$seq(500,1000,by=100)$(maximum number of iterations).\\
+We choose the one with lowest out of sample error and save model as $optimal_{boost}$.
+
+<<echo=FALSE, results='hide',message=FALSE>>=
+#random forest
+hyper_gridrf <- expand.grid(
+  mtry       = seq(2, 9, by = 1),
+  sampe_size = c(.70, .80, 1),
+  num_tree = seq(500,1000,by=100),
+  OOB_RMSE  = 0
+)
+
+# perform grid search
+for(i in 1:nrow(hyper_gridrf)) {
+  
+  # train model
+  model <- ranger(
+    formula         = quality ~ ., 
+    data            = trainDf, 
+    num.trees       = hyper_gridrf$num_tree[i],
+    mtry            = hyper_gridrf$mtry[i],
+    sample.fraction = hyper_gridrf$sampe_size[i],
+    seed            = 100,
+    importance      = 'impurity',
+    classification = TRUE
+  )
+  # add OOB error to grid
+  hyper_gridrf$OOB_RMSE[i] <- sqrt(model$prediction.error)
+}
+
+#hyper_grid = read.table("rmserf.txt",header=TRUE,row.names=1) # says first column are rownames
+
+optimal_RF <- ranger(
+    formula         = quality ~ ., 
+    data            = trainDf, 
+    num.trees       = hyper_gridrf$num_tree[which.min(hyper_gridrf$OOB_RMSE)],
+    mtry            = hyper_gridrf$mtry[which.min(hyper_gridrf$OOB_RMSE)],
+    sample.fraction = hyper_gridrf$sampe_size[which.min(hyper_gridrf$OOB_RMSE)],
+    seed            = 100,
+    importance      = 'impurity',
+    classification = TRUE
+  )
+optimal_RFp <- ranger(
+    formula         = quality ~ ., 
+    data            = trainDf, 
+    num.trees       = hyper_gridrf$num_tree[which.min(hyper_gridrf$OOB_RMSE)],
+    mtry            = hyper_gridrf$mtry[which.min(hyper_gridrf$OOB_RMSE)],
+    sample.fraction = hyper_gridrf$sampe_size[which.min(hyper_gridrf$OOB_RMSE)],
+    seed            = 100,
+    importance      = 'impurity',
+    #classification = TRUE,
+    probability = TRUE
+  )
+#boosting-----------------------------------
+xgb.data.train <- xgb.DMatrix(as.matrix(trainDf[, colnames(trainDf) != "quality"]), label = trainDf$quality)
+xgb.data.test <- xgb.DMatrix(as.matrix(testDf[, colnames(testDf) != "quality"]), label = testDf$quality)
+#parameter
+idv = c(2,3,4); ntv = 500; shv = c(.1,0.05,.01,0.005) 
+hyper_gridboost = expand.grid(idv,ntv,shv,  ooberror  = 0) 
+colnames(hyper_gridboost) = c("tdepth","ntree","shrink","ooberror") 
+#params <- list(booster = "gbtree", objective = "multi:softmax",num_class=7, eta=0.1, gamma=0.05, max_depth=3, min_child_weight=1, subsample=1, colsample_bytree=1)
+for (i in 1:nrow(hyper_gridboost)) {
+  params <- list(booster = "gbtree", objective = "multi:softmax",num_class=5, eta=0.1, gamma=hyper_gridboost$shrink[i], max_depth=hyper_gridboost$tdepth[i], min_child_weight=1, subsample=1, colsample_bytree=1)
+  xgbcv <- xgb.cv( params = params, data = xgb.data.train, nrounds = hyper_gridboost$ntree[i],  nfold = 10 ,print_every_n = 1000)
+  hyper_gridboost$ooberror[i]=xgbcv$evaluation_log$test_merror_mean[which.min(xgbcv$evaluation_log$test_merror_mean)]
+}
+#write.table(hyper_gridboost,"boostrmse.txt")
+#hyper_gridboost = read.table("boostrmse.txt",header=TRUE,row.names=1) # says first column are rownames
+
+
+params <- list(booster = "gbtree", objective = "multi:softmax",num_class=5, eta=0.1, 
+               gamma=hyper_gridboost$shrink[which.min(hyper_gridboost$ooberror)], 
+               max_depth=hyper_gridboost$tdepth[which.min(hyper_gridboost$ooberror)], 
+               min_child_weight=1, subsample=1, colsample_bytree=1)
+optimal_boost <- xgb.cv (params = params, data = xgb.data.train, nrounds = 500,  print_every_n = 1000, nfold = 10 )
+bestn=which.min(optimal_boost$evaluation_log$test_merror_mean)
+optimal_boost <- xgb.train (params = params, data = xgb.data.train, nrounds = bestn, watchlist = list(train=xgb.data.train,eval=xgb.data.test),print_every_n = 1000 )
+@
+
+<<echo=FALSE,message=FALSE>>=
+#cat("parameters of best random forest: " )
+knitr::kable(hyper_gridrf[which.min(hyper_gridrf$OOB_RMSE),],caption="parameter of best random forest")
+#cat("parameters of best boosting: " )
+hyper_gridboost$ntree = bestn
+knitr::kable(hyper_gridboost[which.min(hyper_gridboost$ooberror),],caption="parameter of best boosting")
+
+@
+\subsection{Comparison}
+\subsubsection{error plot}
+We could see how out of sample error changes corresponding to different settings between these 3 tree models in the following plot.
+
+<<echo=FALSE,message=FALSE, fig.keep='first', fig.align = 'center',fig.height = 3, fig.width = 10>>=
+
+#plot for changing in oob error
+par(mfrow=c(1,3))
+OOB_RMSEst = matrix(cbind(hyper_gridst$OOB_RMSE2sp,hyper_gridst$OOB_RMSE3sp),nrow=8)
+hyper_gridstp = matrix(c(OOB_RMSEst,seq(1,8)),nrow=8)
+plote1 = ggplot(as.data.frame(hyper_gridstp),aes(x=hyper_gridstp[,2],y=hyper_gridstp[,1])) +
+  geom_point(colour='blue') +
+  geom_line(colour='lightblue')+
+  geom_vline(xintercept =which.min(hyper_gridstp[,1]),colour='red')+
+  ylab("out of sample error")+
+  xlab("different settings")+
+  ggtitle("oob error in single tree")
+
+plote2 = ggplot(hyper_gridrf, aes(x=seq(1,nrow(hyper_gridrf)),y=OOB_RMSE)) +
+  geom_point(colour='blue') +
+  geom_line(colour='lightblue')+
+  geom_vline(xintercept =which.min(hyper_gridrf$OOB_RMSE),colour='red')+
+  ylab("out of sample error")+
+  xlab("different settings")+
+  ggtitle("oob error in RF") +
+ # guides(fill=F)+
+  scale_fill_gradient(low="grey", high="blue")
+
+plote3 = ggplot(hyper_gridboost, aes(x=seq(1,nrow(hyper_gridboost)),y=ooberror)) +
+  geom_point(colour='blue') +
+  geom_line(colour='lightblue')+
+  geom_vline(xintercept =which.min(hyper_gridboost$ooberror),colour='red')+
+  ylab("out of sample error")+
+  xlab("different settings")+
+  ggtitle("oob error in boosting") 
+grid.arrange(plote1, plote2, plote3, ncol=3, nrow = 1)
+@
+\subsubsection{Variable Importance}
+We can get the variable importances for the 3 best tree models:
+<<echo=FALSE,message=FALSE,warning=FALSE, fig.align = 'center',fig.height = 3, fig.width = 10>>=
+#single tree
+plot1 = best.tree$variable.importance %>% 
+  tidy() %>%
+  dplyr::arrange(desc(x)) %>%
+  #top_n(3)%>%
+  ggplot(aes(reorder(names, x), x,fill=x)) +
+  geom_col() +
+  coord_flip() +
+  ylab("Variable Importance")+
+  xlab("Variable")+
+  ggtitle("Single Tree") +
+ # guides(fill=F)+
+  scale_fill_gradient(low="grey", high="blue")
+
+#rf
+plot2 = optimal_RF$variable.importance %>% 
+  tidy() %>%
+  dplyr::arrange(desc(x)) %>%
+  ggplot(aes(reorder(names, x), x,fill=x)) +
+  geom_col() +
+  coord_flip() +
+  ylab("Variable Importance")+
+  xlab("Variable")+
+  ggtitle("Random Forest") +
+ # guides(fill=F)+
+  scale_fill_gradient(low="grey", high="blue")
+
+#boosting
+mat <- xgb.importance (feature_names = colnames(trainDf),model = optimal_boost)
+bimp=(mat$Gain)
+names(bimp)=mat$Feature
+plot3 = (bimp*1000) %>% 
+  tidy() %>%
+  dplyr::arrange(desc(x)) %>%
+  ggplot(aes(reorder(names, x), x,fill=x)) +
+  geom_col() +
+  coord_flip() +
+  ylab("Variable Importance")+
+  xlab("Variable")+
+  ggtitle("Boosting") +
+ # guides(fill=F)+
+  scale_fill_gradient(low="grey", high="blue")
+#xgb.ggplot.importance (importance_matrix = mat) 
+
+grid.arrange(plot1, plot2, plot3, ncol=3, nrow = 1)
+@
+From the plot we could see variable 'alcohol' is the most important obviously, variable 'volatile.acidity','free.sulfur.dioxide' and 'chlorides' seem to be relatively important, 'fixed.acidity' and 'sulphates' turn out to be most negligible.
+
+\subsubsection{Accuracy}
+We are going to store results from various fits on the test dataset in the list phatL. After using predict() to obtain yhat on each best model from single tree, random forest and boosting, we calculate accuracy. We could see that random forest has higher accuracy.
+
+<<echo=FALSE,message=FALSE,background='#e6e6e6'>>=
+phatL = list() #store the test phat for the different methods here
+phatL$glmmin = preglmmin #lambda.min
+#predict single tree
+yhatst = predict(best.tree,newdata=testDf)
+#yhatpl = cbind(yhatst,array(sapply(1:nrow(testDf),function(i) which.max(yhatst[i,])))) #choose category
+phatL$singt = as.vector(sapply(1:nrow(testDf),function(i) which.max(yhatst[i,])-1))
+#random forest
+phatL$rf = predict(optimal_RF,data=testDf[,1:9])$predictions####gai####
+probrf=predict(optimal_RFp,data=testDf[,1:9])$predictions####gai####
+#boosting
+#model prediction
+phatL$boosting <- predict (optimal_boost,xgb.data.test)
+#compare
+acc =cbind(mean(phatL$singt == testDf[,10]),mean(phatL$rf == testDf[,10]),mean(phatL$boosting == testDf[,10]))####gai####
+rownames(acc)='accuracy'
+colnames(acc)=c('single tree','Random Forest','boosting')
+knitr::kable(acc)
+#kable(acc, "latex", booktabs = T) %>% kable_styling(position = "center")
+@
+\subsubsection{ROC curve and AUC}
+
+We draw same approach introduced above to plot ROC curve to tell how much model is capable of distinguishing between classes and compute multi-class AUC .
+<<echo=FALSE,message=FALSE, background='#e6e6e6', fig.align = 'center',fig.height = 3.5, fig.width = 10>>=
+##plot roc
+par(mfrow=c(1,3))
+#single tree
+qualityte = one_hot(as.data.table(factor(testDf$quality))) # original 
+qualitypresingt=factor(phatL$singt,levels=0:4) # reset level in case some category doesn't show up in the prediction
+qualitypresingt=one_hot(as.data.table(qualitypresingt))
+nfit = 5
+par(mai=c(.8, 1.2, .5, .5))
+plot(roc(qualityte[[1]], qualitypresingt[[1]]),xlab='Specificity', ylab      ='Sensitivity',xlim=c(1,0),ylim=c(0,1),main = "single tree models",col=1)
+for(i in 2:nfit) {
+  roc=roc(qualityte[[i]], qualitypresingt[[i]])
+  lines(roc,col=i) 
+}
+legend(1, 1, c("0","1","2","3","4"), col = c(1, 2, 3, 4, 5),lwd=1, bg="transparent",cex=0.6)
+
+roc.multist = multiclass.roc(testDf$quality,phatL$singt, levels = c(0, 1,2,3,4) )
+# rs <- roc.multist[['rocs']]
+# plot.roc(rs[[1]],xlim=c(1,0),ylim=c(0,1), main="Single Tree",add=FALSE)
+# sapply(2:length(rs),function(i) lines.roc(rs[[i]],col=i))
+# legend(1, 1.8, c("class 1", "class 2", "class 3","class 4","class 5"), col = c(1, 2, 3,4,5), lwd = c(1,1,1,1,1),bg="transparent",cex=0.8)
+
+#RF
+qualityprerf=factor(phatL$rf,levels=0:4) # reset level in case some category doesn't show up in the prediction
+qualityprerf=one_hot(as.data.table(qualityprerf))
+par(mai=c(.8, 1.2, .5, .5))
+plot(roc(qualityte[[1]], qualityprerf[[1]]),xlab='Specificity', ylab      ='Sensitivity',xlim=c(1,0),ylim=c(0,1),main = "Random Forest models",col=1)
+for(i in 2:nfit) {
+  roc=roc(qualityte[[i]], qualityprerf[[i]])
+  lines(roc,col=i) 
+}
+legend(1, 1, c("0","1", "2", "3","4"), col = c(1, 2, 3, 4, 5), lwd = c(1,1,1,1,1),bg="transparent",cex=0.6)
+roc.multirf = multiclass.roc(testDf$quality,phatL$rf)
+# rs <- roc.multirf[['rocs']]
+# plot.roc(rs[[1]],ylim=c(0.5,1),main="Random Forest")
+# sapply(2:length(rs),function(i) lines.roc(rs[[i]],col=i))
+# legend(1, 1.5, c("class 0", "class 1", "class 2"), col = c(1, 2, 3), lwd = c(1,1,1),bg="transparent",cex=0.9)
+
+#boosting
+qualitypreboost=factor(phatL$boosting,levels=0:4) # reset level in case some category doesn't show up in the prediction
+qualitypreboost=one_hot(as.data.table(qualitypreboost))
+par(mai=c(.8, 1.2, .5, .5))
+plot(roc(qualityte[[1]], qualitypreboost[[1]]),xlab='Specificity', ylab      ='Sensitivity',xlim=c(1,0),ylim=c(0,1),main = "Boosting models",col=1)
+for(i in 2:nfit) {
+  roc=roc(qualityte[[i]], qualitypreboost[[i]])
+  lines(roc,col=i) 
+}
+legend(1, 1, c("0","1", "2", "3","4"), col = c(1, 2, 3, 4, 5), lwd = c(1,1,1,1,1),bg="transparent",cex=0.6)
+roc.multiboost = multiclass.roc(testDf$quality,phatL$boosting)
+# rs <- roc.multiboost[['rocs']]
+# plot.roc(rs[[1]],ylim=c(0.5,1), main="boosting")
+# sapply(2:length(rs),function(i) lines.roc(rs[[i]],col=i))
+# legend(1, 1.5, c("class 0", "class 1", "class 2"), col = c(1, 2, 3), lwd = c(1,1,1),bg="transparent",cex=0.9)
+
+auc=cbind(auc(roc.multist),auc(roc.multirf),auc(roc.multiboost))
+rownames(auc)='auc'
+colnames(auc)=c('single tree','Random Forest','boosting')
+knitr::kable(auc)
+@
+Therefore,from the Roc curve we could see that both three models predicts bad at class 0 and 4 and RF$>$boosting$>$single tree. Also, AUC provides very similar results.\\
+Combined with accuracy above, we choose random forest as out best tree model.
+
+\section{Neural Network}
+\subsection{Single Layer Neural Network}
+
+First, we apply Single Layer Neural Network to train the model. In order to get the best combination of parameter. We used grid search method and tested some essential parameters including "hidden, l1, epochs, activation and rate".
+
+<<echo=FALSE,message=FALSE>>=
+#single
+#single_params = read.table("/Users/apple/Downloads/mratednn_single_1.txt",header=TRUE,row.names=1)
+single_params=data.frame(hidden="10",l1=0.01,epochs=500,activation="TanhWithDropout",   rate=0.01)
+#knitr::kable(single_params, caption = "parameters of best single neural network")
+@
+
+\subsection{Deep Layer Neural Network}
+After we get the best model under single layer neural network, we tried grid search for multi layers model to see if more complex model makes prediction better. This process takes even longer than single layer training. However the performace for the best model it gives is very close to single layer model. The parameter for the best model is as following:
+\subsection{Random Search}
+
+Each grid search above could take few hours to run. However, we found another search method called random search. Random search is a technique where random combinations of the hyperparameters are used to find best solution for the built model. It tries random combination of the values we set. This search method may not give you the best model, but it could give you a relatively better results in the mean time dramatically reduce the running time. In order to have a comparision with the grid search, we did the random search with all the hyper parameters involved. The parameter for the best model is as following: 
+
+\subsection{Comparison}
+Then we could see their best parameters chosen by out of sample error.
+
+<<echo=FALSE,message=FALSE>>=
+#random
+#random_params = read.table("/Users/apple/Downloads/mratednn_random_1.txt",header=TRUE,row.names=1)
+single_params=data.frame(hidden="10",l1=0.01,epochs=500,activation="TanhWithDropout",   rate=0.01)
+deep_params=data.frame(hidden="10,15",l1=0.001,epochs=3000,activation="TanhWithDropout",   rate=0.01)
+random_params=data.frame(hidden="50",l1=0.0001,epochs=100,activation="Tanh",   rate=0.001)
+#kable(random_params) %>%
+  #kable_styling(bootstrap_options = c("striped", "hover", "condensed"))
+nnbpa = rbind(single_params,deep_params,random_params)
+rownames(nnbpa) = c("Single layer","Deep layer","Random search")
+knitr::kable(nnbpa, caption = "parameters of best model from different NN")
+@
+
+After we finished the work discussed above, we want to compare those results to see which one is better. The plots below is the mean per class error given by different hyper parameter combinations. Based on these, we get the best models for each of these search strategies which correspond to the intersection with red lines.\\
+
+\begin{figure}[htbp]
+\centering
+\subfigure[Oob-error-plot.]{
+  \includegraphics[width=5.3cm]{/Users/apple/Downloads/images/single_layer_grid.png}
+}
+\smallskip
+%\quad
+\subfigure[Oob-error-plot.]{
+  \includegraphics[width=5.3cm]{/Users/apple/Downloads/images/deep_layer_grid.png}
+}
+\smallskip
+%\quad
+\subfigure[Oob-error-plot.]{
+  \includegraphics[width=5.3cm]{/Users/apple/Downloads/images/random.png}
+}
+%\smallskip
+%\quad
+\end{figure}
+
+From the best models we got, we did a prediction from test data set using these models and then plot the error rate. The performance for deep NN is better than single layer NN. However what really surpprised us is the model given by Random search is even better than the other two grid search which highly beyond our anticipation. The most important thing is, the running time for random search is almost ten times shorter than grid search! Even though there might be some stochastic involved, it at least proved that compared to grid search, random search could be a more efficient method.
+
+\begin{figure}[hbtp]
+\centering
+\subfigure[Error rate comparison.]{
+  \includegraphics[width=3.5cm]{/Users/apple/Downloads/images/compare3.png}
+}
+\quad
+\end{figure}
+Based on those models, we finally plot the ROC curves for those three models. From these plots, the performance for the category 0, 1 and 3 is better than the other even though the accuracy for those categories is very low. This raised our curiosity and inspired us did some work which will be discussed in next part.
+
+\begin{figure}[hbtp]
+\centering
+\subfigure[Roc for single-grid.]{
+  \includegraphics[width=5cm]{/Users/apple/Downloads/images/ROC_single.png}
+}
+\smallskip
+\subfigure[Roc for deep-grid.]{
+  \includegraphics[width=5cm]{/Users/apple/Downloads/images/ROC_deep.png}
+}
+\smallskip
+\subfigure[Roc for random.]{
+  \includegraphics[width=5cm]{/Users/apple/Downloads/images/ROC_random.png}
+}
+\end{figure}
+
+\subsection{Modify Model---Single NN $+$ NN}
+From the lift curve below, it's interesting that the category 0 and 4 looks good through lift curve however the accuracy rate is very low when predicting them. After examining the probability predicted, we think the main reason is the total number in those categories is too low. The probability predicted is too small to beat the two most populated category 2 and 3. If it is a binary case, it can be fixed by setting the threshold. But for five category, it's hard to do that. However, lift curve "One vs. All" tells us that regarding each category, relatively probability is correct for class like 0 and 4 which has low accuracy. Therefore, maybe it is possible to {\bf let the machine find the pattern} behind the lift curve! 
+
+\begin{figure}[hbt]
+\centering
+\subfigure[Lift curve in single-grid.]{
+  \includegraphics[width=5cm]{/Users/apple/Downloads/images/lift_curve_single_layer.png}
+}
+\quad
+\subfigure[Performance improvement.]{
+  \includegraphics[width=4.5cm]{/Users/apple/Downloads/images/improvement.png}
+}
+\quad
+\end{figure}
+
+Inpired by this question, we train another NN model following our best single layer NN again using random search. It's based on the probability predicted by the previous single layer NN we have and the real category those data is. From the right figure, the result shows that after we applied NN again, the performance for the categories which have a good lift curve has been increased. And the total performance of this model is still improved. Those results is quiet amazing and within our expectation. This approach could be a good way when uneven distribution of original data affects the performance of training model.
+
+\section{Comparison for all best models---Lift Curve}
+Let’s compare all best models: GLMs, RF and NN$+$NN by putting them all on the same lift plot.
+<<echo=FALSE,message=FALSE, background='#f2f2f2', fig.align = 'center',fig.height = 3.5, fig.width = 10>>=
+#plot lift curve
+#we need prob for each class(here probrf is prob of each class as result of rf) 
+
+liftcurve = function(phat.list,y.list){
+  n = nrow(y.list)
+  sy = matrix(0,nrow=n,ncol=ncol(y.list))
+  ii = (1:n)/n
+  for(i in 1:length(phat.list)) {
+    oo = order(-phat.list[[i]])
+    sy[,i] = cumsum(y.list[[i]][oo])/sum(y.list[[i]]==1)
+  }
+  return(sy)
+}
+lcrf = as.data.frame(liftcurve(as.data.frame(probrf), qualityte))
+lcglm = as.data.frame(liftcurve(probglm, qualityte))
+#lcnn = as.data.frame(liftcurve(probnn, qualityte))
+
+# lift.many.plot = function(phat.list, y.list,...) {
+#   if(is.factor(y.list)) y.list = as.numeric(y.list)-1
+#   n = nrow(y.list)
+#   par(mai=c(.8, 1.2, .5, .5))
+#   plot(c(0,1), c(0,1), type="n", xlab='% tried', ylab='% of successes', ...)
+#   abline(0, 1, lty=2)
+#   ii = (1:n) / n
+#   for(i in 1:length(phat.list)) {
+#     oo = order(-phat.list[[i]])
+#     sy = cumsum(y.list[[i]][oo])/sum(y.list[[i]]==1)
+#     lines(ii,sy,type="l",lwd=2,col=i)
+#   }
+# }
+plotlcglm =ggplot(lcglm, aes(x=(1:nrow(lcglm))/nrow(lcglm))) +
+  geom_line(aes(y = lcglm$V1, colour = "0")) +
+  geom_line(aes(y = lcglm$V2, colour = "1"))+
+  geom_line(aes(y = lcglm$V3, colour = "2"))+
+  geom_line(aes(y = lcglm$V4, colour = "3"))+
+  geom_line(aes(y = lcrf$V5, colour = "4"))+
+  geom_abline(slope = 1,intercept = 0,colour="grey")+
+  ylab("% of successes")+
+  xlab("% tried")+
+  ggtitle("Lift Curve in GLM") +
+  scale_colour_manual(name = "Quality",
+                      values = c("blue","darkblue","purple","orange","green"),
+                      breaks = c("0", "1","2","3","4"),
+                      guide = "legend") 
+plotlcrf =ggplot(lcrf, aes(x=(1:nrow(lcrf))/nrow(lcrf))) +
+  geom_line(aes(y = lcrf$V1, colour = "0")) +
+  geom_line(aes(y = lcrf$V2, colour = "1"))+
+  geom_line(aes(y = lcrf$V3, colour = "2"))+
+  geom_line(aes(y = lcrf$V4, colour = "3"))+
+  geom_line(aes(y = lcrf$V5, colour = "4"))+
+  geom_abline(slope = 1,intercept = 0,colour="grey")+
+  ylab("% of successes")+
+  xlab("% tried")+
+  ggtitle("Lift Curve in RF") +
+  scale_colour_manual(name = "Quality",
+                      values = c("blue","darkblue","purple","orange","green"),
+                      breaks = c("0", "1","2","3","4"),
+                      guide = "legend") 
+  #guides()
+
+plotlcnn =ggplot(lcnn, aes(x=(1:nrow(lcnn))/nrow(lcnn))) +
+  geom_line(aes(y = lcnn$V1, colour = "0")) +
+  geom_line(aes(y = lcnn$V2, colour = "1"))+
+  geom_line(aes(y = lcnn$V3, colour = "2"))+
+  geom_line(aes(y = lcnn$V4, colour = "3"))+
+  geom_line(aes(y = lcnn$V5, colour = "4"))+
+  geom_abline(slope = 1,intercept = 0,colour="grey")+
+  ylab("% of successes")+
+  xlab("% tried")+
+  ggtitle("Lift Curve in NN") +
+  scale_colour_manual(name = "Quality",
+                      values = c("blue","darkblue","purple","orange","green"),
+                      breaks = c("0", "1","2","3","4"),
+                      guide = "legend") 
+
+grid.arrange(plotlcglm, plotlcrf,plotlcnn, ncol=3, nrow = 1)
+# phatLLrf = vector("list",nfit)
+# for(i in 1:nfit) {
+# phatLLrf[[i]] = probrf[,i] }
+# lift.many.plot(phatLLrf, qualityte)
+# legend(0, 1, c("1", "2", "3","4","5"), col = c(1, 2, 3,4,5), lwd = c(1,1,1,1,1),bg="transparent",cex=0.7)
+accfi = data.frame(GLM=c(0.5442),RF=c(0.5657),NN=c(0.5676))
+#colnames(accfi) = c("GLM","RF","NN+NN")
+knitr::kable(accfi, caption = "Accuracy of best final models")
+@
+
+From the lift curve, we could see that NN$+$NN shows a good performance for all categories especially 1, 2 and 3, a lot better compared to the other two methods. Which could prove that second NN structure works and it did capture some pattern, not just predicting the class that has more observations. Also the accuracy is slightly better and higher than the other two models.
+
+\section{Conclusion}
+
+We have chosen three powerful methods to do classification in this case and done grid search improving model further, which have made a difference. Whereas we have to admit that none of those is ideal enough, we suppose maybe it's due to uncertainty of person. Cause same person could give same quality for wine even if they have totally different chemical properties, it's hard for machine to tell. So we still need to work on more models which could solve this problem.
+
+\end{document}

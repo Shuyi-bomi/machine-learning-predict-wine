@@ -1,0 +1,31 @@
+\documentclass[a4paper]{article}
+\usepackage{CJK}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{anysize}
+\usepackage{float}
+%\usepackage{booktabs}
+\usepackage{graphicx}
+\usepackage{subfigure}
+%\usepackage{Sweave}
+\marginsize{2.5cm}{2.5cm}{2cm}{2cm}
+
+\begin{document}
+%\SweaveOpts{concordance=TRUE}
+\title{\bf STP 598 Final Project}
+\author{Shuyi Li,Jin Lu, Qingqing Wu\\}
+\maketitle
+\setlength{\baselineskip}{15pt}
+\vspace{20pt}
+% =================================================================================
+%                                 Problem 1
+% =================================================================================
+
+%-------------------------------------------
+\section{Introduction}
+
+
+
+
+
+\end{document}
