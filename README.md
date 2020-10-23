@@ -17,7 +17,7 @@ Next, we could deploy multiple machine learning algorithms regularized linear re
 
 ## Regularized Linear Models
 
-We used regularized linear regression model using the package glmnet() and throwed in all interactions and second order. We applied grid search on alpha and nfolds to get the optimal parameters on 18 settings. The left figure shows how out of sample error changes with different setting, the right shows corresponding setting for the best glm.
+We used regularized linear regression model using the package glmnet() and throwed in all interactions and second order. We applied grid search on alpha and nfolds to get the optimal parameters on 18 settings. The first figure shows how out of sample error changes with different setting, the bottom shows corresponding setting for the best glm.
 
 <p align="middle">
   <img src="https://github.com/Shuyi-bomi/machine-learning-predict-wine/blob/main/figure/glm.png" width="600" />
@@ -28,9 +28,9 @@ We used regularized linear regression model using the package glmnet() and throw
 We compared single tree with two popular ensemble methods(random forest\&boosting). We also did grid search to find optimal hyperparameter for these 2 methods. 
 <p align="middle">
   <img src="https://github.com/Shuyi-bomi/machine-learning-predict-wine/blob/main/figure/treeooberror.png" width="600" />
-  <img src="https://github.com/Shuyi-bomi/machine-learning-predict-wine/blob/main/figure/tree-compare.png" width="600" />
+  <img src="https://github.com/Shuyi-bomi/machine-learning-predict-wine/blob/main/figure/tree%20compare.png" width="600" />
 </p>
-The left plot demonstrated out of bag error while the right showed ROC curve(with AUC) with regard to the best setting for each model. The other advantage for tree models is that it could provide variable importance like the following:
+The top plot demonstrated out of bag error while the bottom showed ROC curve(with AUC) with regard to the best setting for each model. The other advantage for tree models is that it could provide variable importance like the following:
 <p align="middle">
-  <img src="https://github.com/Shuyi-bomi/machine-learning-predict-wine/blob/main/figure/variable-importance.png" width="600" />
+  <img src="https://github.com/Shuyi-bomi/machine-learning-predict-wine/blob/main/figure/variable%20importance.png" width="600" />
 </p>
